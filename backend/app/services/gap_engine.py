@@ -10,17 +10,26 @@ import numpy as np
 from app.core.logging import logger
 from app.schemas.analysis import SkillGapResult
 
+# Check low-memory mode at module top-level to prevent Render 512MB OOM crashes
+LOW_MEMORY_MODE: bool = os.getenv("LOW_MEMORY_MODE", "false").lower() == "true"
+
+
+def is_low_memory_mode() -> bool:
+    """Return True if low memory mode is requested via environment variable or module flag."""
+    return os.getenv("LOW_MEMORY_MODE", "false").lower() == "true" or LOW_MEMORY_MODE
+
+
 # Singleton holder for SentenceTransformer model
 _embedding_model = None
 
 
 def get_embedding_model():
-    """Lazily load and return the SentenceTransformer singleton model with memory safety."""
+    """Lazily load and return the SentenceTransformer singleton model on-demand."""
     global _embedding_model
 
-    # Check for explicit low-memory flag (e.g. on Render free tier to stay < 60 MB RAM)
-    if os.getenv("LOW_MEMORY_MODE", "").strip().lower() in ("true", "1", "yes"):
-        logger.info("LOW_MEMORY_MODE='true' set. Skipping SentenceTransformer load to run in <60 MB RAM.")
+    # If LOW_MEMORY_MODE is true, DO NOT import torch or sentence_transformers
+    if is_low_memory_mode():
+        logger.info("LOW_MEMORY_MODE is enabled; skipping torch/sentence_transformers import (<60 MB RAM).")
         return None
 
     if _embedding_model is None:
@@ -32,7 +41,7 @@ def get_embedding_model():
             from sentence_transformers import SentenceTransformer
 
             _embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
-            logger.info("SentenceTransformer (all-MiniLM-L6-v2) loaded successfully with torch.set_num_threads(1).")
+            logger.info("SentenceTransformer (all-MiniLM-L6-v2) loaded on-demand with torch.set_num_threads(1).")
         except (MemoryError, Exception) as e:
             logger.warning("Could not load SentenceTransformer (%s). Falling back to lightweight memory mode.", e)
             _embedding_model = None
@@ -245,39 +254,40 @@ def compute_skill_gaps(
     missing: list[str] = []
 
     chunks = _chunk_resume_text(resume_text, sections)
-    model = get_embedding_model()
 
     used_transformer = False
-    if model is not None and chunks:
-        try:
-            import torch
+    if not is_low_memory_mode():
+        model = get_embedding_model()
+        if model is not None and chunks:
+            try:
+                import torch
 
-            # Memory-safe inference: wrap in torch.no_grad()
-            with torch.no_grad():
-                skill_embeddings = model.encode(required_skills, normalize_embeddings=True)
-                chunk_embeddings = model.encode(chunks, normalize_embeddings=True)
-                similarity_matrix = np.dot(skill_embeddings, chunk_embeddings.T)
+                # Memory-safe inference: wrap in torch.no_grad()
+                with torch.no_grad():
+                    skill_embeddings = model.encode(required_skills, normalize_embeddings=True)
+                    chunk_embeddings = model.encode(chunks, normalize_embeddings=True)
+                    similarity_matrix = np.dot(skill_embeddings, chunk_embeddings.T)
 
-            for idx, skill in enumerate(required_skills):
-                max_sim = float(np.max(similarity_matrix[idx])) if similarity_matrix.size > 0 else 0.0
+                for idx, skill in enumerate(required_skills):
+                    max_sim = float(np.max(similarity_matrix[idx])) if similarity_matrix.size > 0 else 0.0
 
-                # Exact keyword override: If verbatim skill exists in resume, ensure minimum 0.88 match
-                skill_pattern = r"\b" + re.escape(skill.lower()) + r"\b"
-                if re.search(skill_pattern, cleaned_resume_lower):
-                    max_sim = max(max_sim, 0.88)
+                    # Exact keyword override: If verbatim skill exists in resume, ensure minimum 0.88 match
+                    skill_pattern = r"\b" + re.escape(skill.lower()) + r"\b"
+                    if re.search(skill_pattern, cleaned_resume_lower):
+                        max_sim = max(max_sim, 0.88)
 
-                # Categorize based on strict rubric
-                if max_sim >= 0.70:
-                    matched.append(skill)
-                elif max_sim >= 0.50:
-                    transferable.append(skill)
-                else:
-                    missing.append(skill)
+                    # Categorize based on strict rubric
+                    if max_sim >= 0.70:
+                        matched.append(skill)
+                    elif max_sim >= 0.50:
+                        transferable.append(skill)
+                    else:
+                        missing.append(skill)
 
-            used_transformer = True
-        except (MemoryError, Exception) as e:
-            logger.warning("Transformer inference error (%s); falling back to lightweight similarity.", e)
-            used_transformer = False
+                used_transformer = True
+            except (MemoryError, Exception) as e:
+                logger.warning("Transformer inference error (%s); falling back to lightweight similarity.", e)
+                used_transformer = False
 
     if not used_transformer:
         # Lightweight memory fallback: Fast token-overlap and TF-IDF calculation (<60 MB RAM)
