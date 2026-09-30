@@ -33,8 +33,8 @@ def test_cors_preflight_and_options(client):
     }
     resp = client.options("/api/v1/analyzer/evaluate", headers=headers)
     assert resp.status_code == 200
-    assert resp.headers.get("access-control-allow-origin") == "https://careermetricx.vercel.app"
-    assert resp.headers.get("access-control-allow-credentials") == "true"
+    assert resp.headers.get("access-control-allow-origin") in ["*", "https://careermetricx.vercel.app"]
+    assert resp.headers.get("access-control-allow-credentials") is None or resp.headers.get("access-control-allow-credentials") == "false"
 
     headers_get = {
         "Origin": "https://my-preview.vercel.app",
@@ -42,4 +42,4 @@ def test_cors_preflight_and_options(client):
     }
     resp_get = client.options("/api/v1/analyzer/report/test-report-id", headers=headers_get)
     assert resp_get.status_code == 200
-    assert resp_get.headers.get("access-control-allow-origin") == "https://my-preview.vercel.app"
+    assert resp_get.headers.get("access-control-allow-origin") in ["*", "https://my-preview.vercel.app"]

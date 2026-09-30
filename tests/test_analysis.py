@@ -456,3 +456,90 @@ def test_api_evaluate_includes_star_and_ats_audit(client: TestClient):
     assert isinstance(data["star_recommendations"], list)
 
 
+# ==============================================================================
+# 6. Render Memory-Safe & LOW_MEMORY_MODE Fallback Tests
+# ==============================================================================
+
+def test_gap_engine_low_memory_mode(monkeypatch):
+    """Verify gap engine runs successfully with fast token-overlap and TF-IDF in LOW_MEMORY_MODE."""
+    monkeypatch.setenv("LOW_MEMORY_MODE", "true")
+
+    resume_text = """
+    David Kim
+    Senior Python Developer
+    Skills: Python, FastAPI, Docker, PostgreSQL, Redis
+    Projects:
+    - Built microservices in FastAPI with PostgreSQL database persistence.
+    - Configured Docker containers and Redis cache clusters reducing response time by 30%.
+    """
+    required_skills = ["FastAPI", "Docker", "Kubernetes", "PostgreSQL", "Apache Spark"]
+    preferred_skills = ["Redis", "AWS"]
+
+    result: SkillGapResult = compute_skill_gaps(
+        required_skills=required_skills,
+        resume_text=resume_text,
+        preferred_skills=preferred_skills,
+    )
+
+    # Verbatim skills in resume must be matched
+    assert "FastAPI" in result.matched_skills
+    assert "Docker" in result.matched_skills
+    assert "PostgreSQL" in result.matched_skills
+
+    # Non-existent skills must be categorized as missing
+    assert "Apache Spark" in result.missing_skills
+    assert "Kubernetes" in result.missing_skills
+
+    # Match percentage should be reasonable (> 50%)
+    assert 50.0 <= result.match_percentage <= 100.0
+
+    # Radar metrics must all be valid floats between 0 and 100
+    metrics = result.radar_metrics
+    for key, val in metrics.items():
+        assert 0.0 <= val <= 100.0, f"Radar metric {key} out of bounds: {val}"
+
+
+def test_gap_engine_memory_error_fallback(monkeypatch):
+    """Verify graceful fallback to TF-IDF token calculation if SentenceTransformer raises MemoryError."""
+    import app.services.gap_engine as gap_engine_module
+
+    # Simulate get_embedding_model returning None as if MemoryError occurred
+    monkeypatch.setattr(gap_engine_module, "get_embedding_model", lambda: None)
+
+    resume_text = """
+    Marcus Vance
+    Backend Software Engineer
+    Skills: Python, FastAPI, PostgreSQL, Docker
+    Projects:
+    - Engineered API gateway in FastAPI.
+    """
+    required_skills = ["Python", "FastAPI", "PostgreSQL", "Kafka"]
+
+    result = gap_engine_module.compute_skill_gaps(
+        required_skills=required_skills,
+        resume_text=resume_text,
+    )
+
+    assert "FastAPI" in result.matched_skills
+    assert "Kafka" in result.missing_skills
+    assert result.match_percentage > 0.0
+    assert len(result.radar_metrics) == 5
+
+
+def test_cors_middleware_configuration():
+    """Verify CORSMiddleware is configured with allow_origins=['*'] and allow_credentials=False."""
+    from starlette.middleware.cors import CORSMiddleware as StarletteCORSMiddleware
+
+    # Inspect middleware stack on FastAPI app
+    cors_middleware = None
+    for middleware in app.user_middleware:
+        if middleware.cls == StarletteCORSMiddleware:
+            cors_middleware = middleware
+            break
+
+    assert cors_middleware is not None, "CORSMiddleware not found in app.user_middleware"
+    assert cors_middleware.kwargs.get("allow_origins") == ["*"]
+    assert cors_middleware.kwargs.get("allow_credentials") is False
+
+
+
