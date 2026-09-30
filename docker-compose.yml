@@ -1,0 +1,62 @@
+version: "3.8"
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: careermetricx_mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: careermetricx_dev
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - careermetricx_network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.backend
+    container_name: careermetricx_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=development
+      - MONGODB_URI=mongodb://mongodb:27017
+      - MONGODB_DB_NAME=careermetricx_dev
+      - SECRET_KEY=careermetricx-insecure-dev-secret-key-replace-in-production-min32chars
+      - AI_PROVIDER=deterministic
+      - BACKEND_CORS_ORIGINS=["http://localhost:5173","http://localhost:80","http://localhost"]
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - careermetricx_network
+
+  frontend:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.frontend
+    container_name: careermetricx_frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - careermetricx_network
+
+networks:
+  careermetricx_network:
+    driver: bridge
+
+volumes:
+  mongo_data:
+    driver: local
