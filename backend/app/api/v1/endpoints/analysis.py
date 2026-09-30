@@ -1,7 +1,7 @@
 """API endpoints for resume analysis and semantic skill evaluation."""
 
 import json
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 
 from app.ai.base import BaseAIProvider
 from app.api.deps import get_current_ai_provider
@@ -18,6 +18,20 @@ from app.services.parser import (
 )
 
 router = APIRouter()
+
+
+@router.options("/evaluate", include_in_schema=False)
+async def evaluate_options() -> Response:
+    """Preflight OPTIONS handler ensuring /evaluate does not block CORS preflight."""
+    return Response(
+        status_code=status.HTTP_200_OK,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Credentials": "true",
+        },
+    )
 
 
 @router.post(
@@ -160,6 +174,33 @@ async def evaluate_resume(
         prep_plan=prep_plan,
         star_recommendations=star_recommendations,
         created_at=evaluation_record.get("created_at"),
+    )
+
+@router.options("/report/{report_id}", include_in_schema=False)
+async def report_id_options(report_id: str) -> Response:
+    """Preflight OPTIONS handler ensuring /report/{report_id} does not block CORS preflight."""
+    return Response(
+        status_code=status.HTTP_200_OK,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Credentials": "true",
+        },
+    )
+
+
+@router.options("/report", include_in_schema=False)
+async def report_options() -> Response:
+    """Preflight OPTIONS handler ensuring /report does not block CORS preflight."""
+    return Response(
+        status_code=status.HTTP_200_OK,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Credentials": "true",
+        },
     )
 
 
