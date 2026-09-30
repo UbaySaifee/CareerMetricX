@@ -18,6 +18,11 @@ import {
 import EvaluationDashboard from './components/EvaluationDashboard';
 import type { AnalysisResponse, JDCreate } from './types/analysis';
 
+const RAW_API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) || '/api/v1';
+const API_BASE_URL = RAW_API_BASE.endsWith('/api/v1')
+  ? RAW_API_BASE
+  : `${RAW_API_BASE.replace(/\/$/, '')}/api/v1`;
+
 const SUGGESTED_SKILLS = [
   'Python',
   'FastAPI',
@@ -111,7 +116,7 @@ export default function App() {
         setLoading(true);
         setLoadingStep('Retrieving stored evaluation report...');
         try {
-          const res = await fetch(`/api/v1/analyzer/report/${reportId}`);
+          const res = await fetch(`${API_BASE_URL}/analyzer/report/${reportId}`);
           if (!res.ok) throw new Error('Evaluation report not found.');
           const data: AnalysisResponse = await res.json();
           if (isMounted) setAnalysis(data);
@@ -130,7 +135,7 @@ export default function App() {
     }
 
     // Health probe
-    fetch('/api/v1/health')
+    fetch(`${API_BASE_URL}/health`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data) setHealthStatus(data.status);
@@ -265,7 +270,7 @@ export default function App() {
       formData.append('resume', resumeFile);
       formData.append('jd_payload', JSON.stringify(jdPayload));
 
-      const response = await fetch('/api/v1/analyzer/evaluate', {
+      const response = await fetch(`${API_BASE_URL}/analyzer/evaluate`, {
         method: 'POST',
         body: formData,
       });
